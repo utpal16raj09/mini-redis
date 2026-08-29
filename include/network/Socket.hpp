@@ -7,45 +7,45 @@ using namespace std;
 
 namespace miniredis {
 
-// Socket class wraps low-level POSIX file descriptors for TCP sockets.
-// Manages socket creation, binding, listening, non-blocking mode configuration, and cleanup.
+// The Socket class handles creating, binding, listening, and closing network sockets.
+// It wraps standard Linux socket calls so we don't have to manually manage raw socket numbers everywhere.
 class Socket {
 public:
-    // Constructor accepting an optional existing socket file descriptor (-1 means uninitialized).
+    // Create a Socket wrapper. Defaults to an uninitialized socket (-1).
     explicit Socket(int fd = -1);
 
-    // Destructor closes the socket file descriptor if open.
+    // Destructor automatically closes the network socket when the object is destroyed.
     ~Socket();
 
-    // Disable copy semantics to prevent duplicate closing of socket file descriptors.
+    // Prevent copying to avoid two objects closing the exact same network socket.
     Socket(const Socket&) = delete;
     Socket& operator=(const Socket&) = delete;
 
-    // Enable move semantics to allow transferring ownership of socket handles.
+    // Allow moving ownership of a socket from one object to another.
     Socket(Socket&& other) noexcept;
     Socket& operator=(Socket&& other) noexcept;
 
-    // Creates, configures SO_REUSEADDR, binds to port, and listens for connections.
+    // Binds the socket to a port (default: 6379) and starts listening for client connections.
     bool listenOn(int port, int backlog = 128);
 
-    // Accepts a new client connection on the listening socket.
-    // Populates client_ip and client_port, and returns the new client socket file descriptor.
+    // Accepts a new client connecting to the server.
+    // Returns the client's file descriptor, and fills in client_ip and client_port.
     int acceptConnection(string& client_ip, int& client_port);
 
-    // Enables or disables non-blocking I/O mode using fcntl O_NONBLOCK flag.
+    // Sets the socket to non-blocking mode so network calls like read/write don't freeze the server.
     void setNonBlocking(bool non_blocking);
 
-    // Closes the underlying socket file descriptor.
+    // Safely closes the socket file descriptor.
     void closeSocket();
 
-    // Getter for the raw file descriptor.
+    // Returns the raw socket handle (file descriptor number).
     int getFd() const { return fd_; }
 
-    // Helper to check if socket file descriptor is valid.
+    // Checks if this socket is open and valid.
     bool isValid() const { return fd_ != -1; }
 
 private:
-    int fd_; // POSIX file descriptor for socket (-1 if invalid/closed)
+    int fd_; // The raw Linux file descriptor number representing this network connection.
 };
 
 } // namespace miniredis

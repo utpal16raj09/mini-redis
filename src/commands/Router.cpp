@@ -8,6 +8,7 @@ namespace miniredis {
 
 Router::Router(Database& db, AofEngine* aof) : db_(db), aof_(aof) {}
 
+// Helper function checking if a command mutates database state (e.g. SET, DEL, HSET, LPUSH)
 bool Router::isWriteCommand(const string& cmd) {
     static const unordered_set<string> write_cmds = {
         "SET", "DEL", "EXPIRE", "INCR", "DECR", "FLUSHDB",
@@ -16,6 +17,7 @@ bool Router::isWriteCommand(const string& cmd) {
     return write_cmds.find(cmd) != write_cmds.end();
 }
 
+// Parses and routes incoming RESP request commands to the database engine.
 RespValue Router::dispatch(const RespValue& request, bool log_to_aof) {
     if (request.type != RespType::Array) {
         return RespValue::makeError("ERR unknown command format");
@@ -26,6 +28,7 @@ RespValue Router::dispatch(const RespValue& request, bool log_to_aof) {
         return RespValue::makeError("ERR empty command");
     }
 
+    // Extract command name (e.g. "set", "get") and convert to uppercase ("SET", "GET")
     string cmd = std::get<string>(args[0].value);
     transform(cmd.begin(), cmd.end(), cmd.begin(), ::toupper);
 
@@ -142,11 +145,19 @@ RespValue Router::dispatch(const RespValue& request, bool log_to_aof) {
     }
     // --- Hash Commands ---
     else if (cmd == "HSET") {
-        if (args.size() != 4) {
+        if (args.size() < 4 || args.size() % 2 != 0) {
             response = RespValue::makeError("ERR wrong number of arguments for 'hset' command");
         } else {
-            bool is_new = db_.hset(std::get<string>(args[1].value), std::get<string>(args[2].value), std::get<string>(args[3].value));
-            response = RespValue::makeInteger(is_new ? 1 : 0);
+            string key = std::get<string>(args[1].value);
+            int added_fields = 0;
+            for (size_t i = 2; i < args.size(); i += 2) {
+                string field = std::get<string>(args[i].value);
+                string value = std::get<string>(args[i + 1].value);
+                if (db_.hset(key, field, value)) {
+                    added_fields++;
+                }
+            }
+            response = RespValue::makeInteger(added_fields);
         }
     }
     else if (cmd == "HGET") {
@@ -159,11 +170,15 @@ RespValue Router::dispatch(const RespValue& request, bool log_to_aof) {
         }
     }
     else if (cmd == "HDEL") {
-        if (args.size() != 3) {
+        if (args.size() < 3) {
             response = RespValue::makeError("ERR wrong number of arguments for 'hdel' command");
         } else {
-            bool ok = db_.hdel(std::get<string>(args[1].value), std::get<string>(args[2].value));
-            response = RespValue::makeInteger(ok ? 1 : 0);
+            string key = std::get<string>(args[1].value);
+            int deleted = 0;
+            for (size_t i = 2; i < args.size(); ++i) {
+                if (db_.hdel(key, std::get<string>(args[i].value))) deleted++;
+            }
+            response = RespValue::makeInteger(deleted);
         }
     }
     else if (cmd == "HGETALL") {
@@ -274,7 +289,7 @@ RespValue Router::dispatch(const RespValue& request, bool log_to_aof) {
         }
     }
 
-    // Write-ahead logging to AOF file if command mutates state
+    // Write-ahead logging: Save command to appendonly.aof if it mutates state and succeeded
     if (log_to_aof && aof_ && isWriteCommand(cmd) && response.type != RespType::Error) {
         aof_->append(request);
     }

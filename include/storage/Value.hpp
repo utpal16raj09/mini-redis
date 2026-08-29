@@ -2,10 +2,9 @@
 #define MINI_REDIS_VALUE_HPP
 
 #include <string>
-#include <vector>
 #include <unordered_map>
-#include <unordered_set>
 #include <deque>
+#include <unordered_set>
 #include <variant>
 #include <chrono>
 #include <optional>
@@ -14,7 +13,7 @@ using namespace std;
 
 namespace miniredis {
 
-// Supported Redis value types
+// Supported data structure types in MiniRedis
 enum class ValueType {
     String,
     Hash,
@@ -22,29 +21,34 @@ enum class ValueType {
     Set
 };
 
-// Variant holding actual data based on ValueType
-using DataVariant = variant<string, unordered_map<string, string>, deque<string>, unordered_set<string>>;
+// C++ variant holding the actual underlying data structure for a key
+using DataVariant = variant<
+    string,                         // ValueType::String
+    unordered_map<string, string>,  // ValueType::Hash
+    deque<string>,                  // ValueType::List
+    unordered_set<string>           // ValueType::Set
+>;
 
-// Value structure represents a stored Redis object with data type and TTL support.
+// The Value struct represents any value stored in the database map.
+// It holds the data type, the data variant, and an optional expiration timestamp (TTL).
 struct Value {
     ValueType type{ValueType::String};
     DataVariant data{string("")};
-    
-    // Absolute time point when key expires (if set)
-    optional<chrono::steady_clock::time_point> expire_at;
+    optional<chrono::steady_clock::time_point> expire_at; // Absolute expiration deadline
 
-    // Checks if the key has expired
+    // Checks if this key has expired based on current time
     bool isExpired() const {
         if (!expire_at.has_value()) return false;
         return chrono::steady_clock::now() >= expire_at.value();
     }
 
-    // Remaining TTL in seconds (-1 if no TTL, -2 if expired)
+    // Calculates remaining TTL in seconds (-1 if key has no expiration set)
     int64_t getTtlSeconds() const {
         if (!expire_at.has_value()) return -1;
         auto now = chrono::steady_clock::now();
-        if (now >= expire_at.value()) return -2;
-        return chrono::duration_cast<chrono::seconds>(expire_at.value() - now).count();
+        if (now >= expire_at.value()) return -2; // Expired
+        auto diff = chrono::duration_cast<chrono::seconds>(expire_at.value() - now);
+        return diff.count();
     }
 };
 

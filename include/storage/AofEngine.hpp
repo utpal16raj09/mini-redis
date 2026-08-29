@@ -11,21 +11,24 @@ namespace miniredis {
 
 class Router; // Forward declaration
 
-// AofEngine handles writing write commands to disk and replaying AOF logs on startup.
+// The AofEngine (Append-Only File Engine) provides disk persistence.
+// It logs all database-mutating write commands to disk (appendonly.aof)
+// and replays them on server boot to restore full memory state.
 class AofEngine {
 public:
-    explicit AofEngine(const string& filename = "appendonly.aof");
+    // Create an AOF persistence engine targeting a specific filename (default: appendonly.aof).
+    explicit AofEngine(const string& filepath = "appendonly.aof");
     ~AofEngine();
 
-    // Appends a RESP serialized write command to the AOF file.
+    // Appends a write command to the appendonly.aof file and flushes it to disk.
     void append(const RespValue& command);
 
-    // Replays all commands stored in the AOF file to restore database state.
+    // Reads the appendonly.aof file line-by-line upon startup and replays all commands.
     void loadAndReplay(Router& router);
 
 private:
-    string filename_;
-    ofstream file_stream_;
+    string filepath_; // Path to the AOF log file on disk
+    ofstream file_;   // Output stream for appending commands
 };
 
 } // namespace miniredis

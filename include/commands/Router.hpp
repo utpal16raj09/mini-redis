@@ -11,20 +11,21 @@ namespace miniredis {
 
 class AofEngine; // Forward declaration
 
+// The Router class parses incoming Redis request arrays, matches command names
+// (e.g. SET, GET, HSET, LPUSH), executes database operations, and logs write commands to AOF.
 class Router {
 public:
-    explicit Router(Database& db, AofEngine* aof = nullptr);
+    Router(Database& db, AofEngine* aof = nullptr);
 
-    // Set or update AOF engine pointer
-    void setAofEngine(AofEngine* aof) { aof_ = aof; }
-
-    // Dispatch command and optionally write to AOF if command mutates state
+    // Main command dispatcher function.
+    // Executes command against database and appends to AOF log if log_to_aof is true.
     RespValue dispatch(const RespValue& request, bool log_to_aof = true);
 
 private:
-    Database& db_;
-    AofEngine* aof_;
+    Database& db_;  // Database engine handle
+    AofEngine* aof_; // AOF persistence engine handle
 
+    // Returns true if a command mutates database state (e.g. SET, DEL, HSET)
     bool isWriteCommand(const string& cmd);
 };
 
