@@ -1,0 +1,33 @@
+# Build directories
+build/
+cmake-build-*/
+bin/
+out/
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake
+compile_commands.json
+
+# Compiled binaries and object files
+*.o
+*.obj
+*.so
+*.dylib
+*.a
+miniredis
+
+# Redis persistent data logs
+*.aof
+appendonly.aof
+*.rdb
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
