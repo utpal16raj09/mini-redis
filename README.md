@@ -1,123 +1,327 @@
-# 🔴 MiniRedis
+# MiniRedis
 
-A high-performance, single-threaded, event-driven in-memory Redis server implementation written in modern C++17 from scratch.
+A Redis-inspired, single-threaded, event-driven in-memory key-value store built from scratch in C++17.
 
-MiniRedis uses Linux `epoll` I/O multiplexing, implements the official Redis Serialization Protocol (RESP2), supports multiple core Redis data structures (Strings, Hashes, Lists, Sets), features dual-mode TTL expiration, and provides append-only file (AOF) persistence logging and recovery replay.
+MiniRedis uses Linux `epoll` for non-blocking I/O, implements the Redis Serialization Protocol (RESP2), supports multiple core Redis data structures, provides TTL-based key expiration, and includes Append-Only File (AOF) persistence with startup recovery.
 
----
+## Architecture
 
-## 🔍 How Close is MiniRedis to Real Production Redis?
+MiniRedis follows a single-threaded event-driven architecture inspired by the core design principles of Redis.
 
-| Architectural Dimension | Real Production Redis | MiniRedis Implementation | Similarity Level |
-|---|---|---|---|
-| **Networking & I/O Model** | Single-threaded event loop via `epoll` / `kqueue` / `select` | Single-threaded non-blocking reactor loop using Linux `epoll_wait` | 🎯 **95% Identical** |
-| **Wire Protocol** | RESP2 & RESP3 framing formats | State-based stream parser for **RESP2** (`+`, `-`, `:`, `$`, `*`) | 🎯 **90% Identical** |
-| **Client Socket Buffering** | Non-blocking input/output ring buffers with `EPOLLOUT` interest | Asynchronous non-blocking read/write buffers per connection handle | 🎯 **90% Identical** |
-| **Data Type Support** | Strings, Hashes, Lists, Sets, Sorted Sets, Bitmaps, HyperLogLogs | Strings, Hashes (`unordered_map`), Lists (`deque`), Sets (`unordered_set`) | 🎯 **80% Identical** |
-| **Key Eviction / Expiration** | Lazy eviction on key access + Active background random sampling (100ms) | Dual-layer: Lazy eviction on access + Active random sampling every 100ms | 🎯 **90% Identical** |
-| **Persistence Engine** | RDB snapshots + AOF log file appending / rewriting | Write-Ahead Append-Only File (`appendonly.aof`) log & startup replay | 🎯 **85% Identical** |
+| Subsystem    | MiniRedis Implementation                        |
+| ------------ | ----------------------------------------------- |
+| Networking   | Non-blocking TCP sockets with Linux `epoll`     |
+| Event Loop   | Single-threaded Reactor pattern                 |
+| Protocol     | Stateful RESP2 parser and encoder               |
+| Storage      | In-memory hash table using `std::unordered_map` |
+| Data Types   | Strings, Hashes, Lists, Sets                    |
+| Expiration   | Lazy eviction + active background sampling      |
+| Persistence  | Append-Only File (AOF) logging and replay       |
+| Build System | CMake                                           |
+| Language     | C++17                                           |
 
----
+## Project Structure
 
-## 📁 File Structure & Component Guide
+```text
+mini-redis/
+├── CMakeLists.txt
+├── include/
+│   ├── network/
+│   │   ├── Socket.hpp
+│   │   ├── Connection.hpp
+│   │   └── EventLoop.hpp
+│   ├── protocol/
+│   │   └── RespParser.hpp
+│   ├── storage/
+│   │   ├── Value.hpp
+│   │   ├── Database.hpp
+│   │   └── AofEngine.hpp
+│   └── commands/
+│       └── Router.hpp
+└── src/
+    ├── network/
+    │   ├── Socket.cpp
+    │   ├── Connection.cpp
+    │   └── EventLoop.cpp
+    ├── protocol/
+    │   └── RespParser.cpp
+    ├── storage/
+    │   ├── Database.cpp
+    │   └── AofEngine.cpp
+    ├── commands/
+    │   └── Router.cpp
+    └── main.cpp
+```
 
-### 🌐 Network Layer (`include/network/` & `src/network/`)
-* **`Socket.hpp` / `Socket.cpp`**: 
-  * Wraps Linux POSIX socket APIs (`socket()`, `bind()`, `listen()`, `accept()`, `fcntl()`).
-  * Manages socket lifecycle and configures non-blocking flags (`O_NONBLOCK`).
-* **`Connection.hpp` / `Connection.cpp`**: 
-  * Manages per-client state, connection file descriptor, streaming read buffer (`read_buffer_`), and asynchronous write buffer (`write_buffer_`).
-  * Handles non-blocking `recv()` and non-blocking `send()` (`MSG_DONTWAIT`).
-* **`EventLoop.hpp` / `EventLoop.cpp`**: 
-  * Core **epoll Reactor Event Loop**.
-  * Registers listening socket and client sockets into Linux `epoll` interest list (`EPOLLIN` for reading, `EPOLLOUT` when write buffers are pending).
-  * Executes background tasks (active TTL eviction) during `epoll_wait` timeouts.
+## Components
 
-### 📜 Protocol Layer (`include/protocol/` & `src/protocol/`)
-* **`RespParser.hpp` / `RespParser.cpp`**: 
-  * Implements the **RESP (Redis Serialization Protocol)** encoder and stateful decoder.
-  * Constructs and parses Simple Strings (`+`), Errors (`-`), Integers (`:`), Bulk Strings (`$`), Nulls (`$-1`), and Arrays (`*`).
+### Network Layer
 
-### 💾 Storage Layer (`include/storage/` & `src/storage/`)
-* **`Value.hpp`**: 
-  * Variant wrapper (`std::variant`) supporting multiple C++ data structures (`string`, `unordered_map`, `deque`, `unordered_set`) alongside TTL expiration timestamps (`chrono::steady_clock`).
-* **`Database.hpp` / `Database.cpp`**: 
-  * Central in-memory hash table (`unordered_map<string, Value>`).
-  * Provides atomic string, hash, list, set, and key management operations.
-  * Implements `purgeExpiredKeys()` for active background memory reclamation.
-* **`AofEngine.hpp` / `AofEngine.cpp`**: 
-  * Append-Only File (`appendonly.aof`) persistence logger.
-  * Logs state-mutating write commands to disk and replays them sequentially upon server startup.
+**`Socket`**
 
-### ⚙️ Command & Entry Point (`include/commands/`, `src/commands/`, `src/`)
-* **`Router.hpp` / `Router.cpp`**: 
-  * Command pattern dispatcher. Decodes incoming RESP requests and routes them to appropriate database methods. Writes mutating commands to `AofEngine`.
-* **`main.cpp`**: 
-  * Application entry point. Instantiates `Database`, `AofEngine`, `Router`, replays AOF history, and starts the `EventLoop` on port `6379`.
+Encapsulates Linux POSIX socket operations including:
 
----
+* Socket creation
+* Address binding
+* TCP listening
+* Client acceptance
+* Non-blocking socket configuration
+* Socket lifecycle management
 
-## 🛠️ Detailed Implementation Mechanics
+**`Connection`**
 
-### 1. Epoll Non-Blocking Reactor Loop
-Instead of creating a thread per connection or using blocking calls:
-1. Sockets are marked non-blocking via `fcntl(fd, F_SETFL, flags | O_NONBLOCK)`.
-2. The server main loop calls `epoll_wait(epoll_fd, events, MAX_EVENTS, 100)`.
-3. When `EPOLLIN` triggers on the server socket, a new client is accepted.
-4. When `EPOLLIN` triggers on a client socket, data is read into `read_buffer_` and parsed into RESP commands.
-5. When `EPOLLOUT` triggers, pending data in `write_buffer_` is flushed asynchronously.
+Maintains per-client state, including:
 
-### 2. Dual-Layer TTL Eviction
-1. **Lazy Eviction:** Every key lookup in `get()`, `exists()`, `hget()`, etc., checks if the expiration timestamp has passed. If expired, the key is immediately erased and `nullopt` is returned.
-2. **Active Eviction:** Every 100ms cycle during `epoll_wait` timeout, `purgeExpiredKeys(20)` samples up to 20 keys from the database and deletes any expired keys automatically.
+* Socket descriptor
+* Input buffer
+* Output buffer
+* Non-blocking reads and writes
+* RESP request processing
 
-### 3. AOF Persistence & Startup Replay
-1. Every write command (`SET`, `DEL`, `INCR`, `HSET`, `LPUSH`, `SADD`, etc.) is serialized back to standard RESP string format.
-2. The serialized bytes are appended to `appendonly.aof` and flushed to disk.
-3. On boot, `AofEngine::loadAndReplay()` reads `appendonly.aof` line-by-line using `RespParser` and executes commands back into `Router` (with AOF re-logging suppressed).
+**`EventLoop`**
 
----
+Implements the main `epoll`-based Reactor loop.
 
-## 📋 Supported Commands Reference
+It manages:
 
-| Category | Commands |
-|---|---|
-| **System** | `PING [msg]`, `INFO`, `FLUSHDB` |
-| **Strings** | `SET key value [EX sec \| PX ms]`, `GET key`, `INCR key`, `DECR key` |
-| **Key & Expiration** | `DEL key1 [key2]`, `EXISTS key1 [key2]`, `EXPIRE key seconds`, `TTL key`, `KEYS pattern` |
-| **Hashes** | `HSET key field value`, `HGET key field`, `HDEL key field`, `HGETALL key` |
-| **Lists** | `LPUSH key val1 [val2]`, `RPUSH key val1 [val2]`, `LPOP key`, `RPOP key`, `LRANGE key start stop` |
-| **Sets** | `SADD key mem1 [mem2]`, `SREM key mem1 [mem2]`, `SMEMBERS key` |
+* Client connection events
+* `EPOLLIN` read readiness
+* `EPOLLOUT` write readiness
+* Connection lifecycle
+* Periodic background expiration checks
 
----
+### Protocol Layer
 
-## 🚀 Building & Running
+**`RespParser`**
 
-### Prerequisites
-* GCC/Clang with C++17 support
-* CMake 3.16+
-* Linux OS (for `epoll` support)
+Implements a stateful RESP2 stream parser and encoder.
 
-### Build Commands
+Supported RESP2 types include:
+
+* Simple Strings
+* Errors
+* Integers
+* Bulk Strings
+* Null Bulk Strings
+* Arrays
+
+The parser handles partial TCP reads by retaining incomplete data until a complete RESP frame is available.
+
+### Storage Layer
+
+**`Value`**
+
+Provides a polymorphic value representation using `std::variant`.
+
+Supported types:
+
+```text
+String      → std::string
+Hash        → std::unordered_map
+List        → std::deque
+Set         → std::unordered_set
+```
+
+Each value can optionally contain an expiration timestamp.
+
+**`Database`**
+
+Provides the in-memory data store and implements:
+
+* String operations
+* Hash operations
+* List operations
+* Set operations
+* Key management
+* TTL handling
+* Expired-key cleanup
+
+### Persistence Layer
+
+**`AofEngine`**
+
+Implements Append-Only File persistence.
+
+Mutating commands are serialized using RESP and appended to:
+
+```text
+appendonly.aof
+```
+
+During startup, the AOF is replayed to reconstruct the in-memory database state.
+
+### Command Layer
+
+**`Router`**
+
+Acts as the command dispatcher.
+
+It:
+
+1. Receives parsed RESP commands.
+2. Validates command arguments.
+3. Routes commands to the appropriate database operation.
+4. Generates RESP responses.
+5. Sends mutating commands to the AOF engine for persistence.
+
+## Core Design
+
+### Non-Blocking Event-Driven Networking
+
+MiniRedis uses a single-threaded Reactor architecture based on Linux `epoll`.
+
+```text
+                    ┌─────────────────┐
+                    │   Event Loop    │
+                    │    epoll_wait   │
+                    └────────┬────────┘
+                             │
+              ┌──────────────┼──────────────┐
+              │              │              │
+           EPOLLIN        EPOLLIN        EPOLLOUT
+              │              │              │
+              ▼              ▼              ▼
+        New Connection    Read Request   Flush Response
+              │              │              │
+              ▼              ▼              ▼
+           Socket       RESP Parser    Write Buffer
+                             │
+                             ▼
+                           Router
+                             │
+                             ▼
+                         Database
+```
+
+All application state is managed by a single event-loop thread, avoiding synchronization overhead between worker threads.
+
+### TTL Expiration
+
+MiniRedis uses two expiration mechanisms.
+
+**Lazy eviction**
+
+Expiration is checked when a key is accessed. Expired keys are removed before returning the result.
+
+**Active eviction**
+
+The event loop periodically samples keys and removes expired entries in the background.
+
+This prevents expired keys from remaining indefinitely in memory when they are never accessed.
+
+### AOF Persistence
+
+Write operations are recorded in RESP format:
+
+```text
+Client
+  │
+  ▼
+Router
+  │
+  ├──────────────► Database
+  │
+  └──────────────► AofEngine
+                         │
+                         ▼
+                  appendonly.aof
+```
+
+On restart:
+
+```text
+appendonly.aof
+       │
+       ▼
+ RespParser
+       │
+       ▼
+   Router
+       │
+       ▼
+   Database
+```
+
+This reconstructs the database state from the persisted command history.
+
+## Supported Commands
+
+| Category          | Commands                                   |
+| ----------------- | ------------------------------------------ |
+| System            | `PING`, `INFO`, `FLUSHDB`                  |
+| Strings           | `SET`, `GET`, `INCR`, `DECR`               |
+| Keys & Expiration | `DEL`, `EXISTS`, `EXPIRE`, `TTL`, `KEYS`   |
+| Hashes            | `HSET`, `HGET`, `HDEL`, `HGETALL`          |
+| Lists             | `LPUSH`, `RPUSH`, `LPOP`, `RPOP`, `LRANGE` |
+| Sets              | `SADD`, `SREM`, `SMEMBERS`                 |
+
+### Examples
+
 ```bash
-mkdir -p build && cd build
+redis-cli -p 6379 PING
+```
+
+```bash
+redis-cli -p 6379 SET greeting "Hello MiniRedis"
+redis-cli -p 6379 GET greeting
+```
+
+```bash
+redis-cli -p 6379 HSET user:100 name "Alice" email "alice@example.com"
+redis-cli -p 6379 HGETALL user:100
+```
+
+```bash
+redis-cli -p 6379 LPUSH queue job1 job2 job3
+redis-cli -p 6379 LRANGE queue 0 -1
+```
+
+## Building
+
+### Requirements
+
+* Linux
+* GCC or Clang with C++17 support
+* CMake 3.16 or later
+
+### Build
+
+```bash
+git clone https://github.com/utpal16raj09/mini-redis.git
+cd mini-redis
+
+mkdir -p build
+cd build
+
 cmake ..
 make
 ```
 
-### Run Server
+### Run
+
 ```bash
 ./miniredis
 ```
 
-### Test with `redis-cli`
-In a separate terminal, run:
+The server listens on port `6379`.
+
+Test it using the standard Redis CLI:
+
 ```bash
 redis-cli -p 6379 PING
-redis-cli -p 6379 SET greeting "Hello MiniRedis"
-redis-cli -p 6379 GET greeting
-redis-cli -p 6379 HSET user:100 name "Alice" email "alice@example.com"
-redis-cli -p 6379 HGETALL user:100
-redis-cli -p 6379 LPUSH queue job1 job2 job3
-redis-cli -p 6379 LRANGE queue 0 -1
 ```
+
+## Project Goals
+
+MiniRedis was built to explore the systems concepts behind an in-memory database, including:
+
+* TCP socket programming
+* Non-blocking I/O
+* Linux `epoll`
+* Event-driven architecture
+* Network protocol design
+* Stateful stream parsing
+* In-memory data structures
+* TTL and memory reclamation
+* Persistence and crash recovery
+* C++17 systems programming
